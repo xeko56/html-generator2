@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 from html2image import Html2Image
 
-os.environ["OPENAI_API_KEY"] = "sk-proj-qb2kTq3S9q2uHRAZBQSaT3BlbkFJglnrq98GKBUJWMmkT3Xy"
+os.environ["OPENAI_API_KEY"] = "API_KEY"
 
 def should_merge(percentage):
     """
