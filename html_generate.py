@@ -5,8 +5,38 @@ import numpy as np
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from html2image import Html2Image
+from huggingface_hub import HfApi
 
-os.environ["OPENAI_API_KEY"] = "API_KEY"
+os.environ["OPENAI_API_KEY"] = "sk-proj-qCuIGSjvbNnTrJQl6wHTT3BlbkFJGEFGiYqRCE0u4ehGDyes"
+
+def create_huggingface_repo(repo_name, organization_name="username", private=False):
+    """
+    Create a new Hugging Face repository.
+    
+    Args:
+        repo_name (str): The name of the repository to create.
+        organization_name (str): The name of the organization to create the repository under.
+        private (bool): Whether the repository should be private.
+        
+    Returns:
+        dict: The response from the Hugging Face API.
+    """
+    api = HfApi()
+    return api.create_repo(repo_name, organization=organization_name, private=private)
+
+def upload_files_to_huggingface_repo(repo_id, files):
+    """
+    Upload files to a Hugging Face repository.
+    
+    Args:
+        repo_id (str): The ID of the repository to upload files to.
+        files (list): A list of dictionaries containing the file name and file path.
+        
+    Returns:
+        dict: The response from the Hugging Face API.
+    """
+    api = HfApi()
+    return api.upload_files(repo_id, files)
 
 def should_merge(percentage):
     """
@@ -94,8 +124,13 @@ def populate_content(html_table):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "I have an HTML table with specific dimensions, rowspan, colspan and dummy data and I need to populate it with meaningful content. The table should be filled in a way that each cell has unique and appropriate content related to the table's context. The table has header cells, and the remaining cells should contain data without strange unicode symbols, please don't remove any table cell on purpose."},
-            {"role": "user", "content": html_table}
+            {
+                "role": "system", 
+                "content": "I have an HTML table with specific dimensions, each row and column meticulously planned to suit the layout's needs. It features cells with rowspan and colspan where specified. Please populate this table with content relevant to a conference schedule, adhering strictly to the existing structure. Ensure no cells are added or removed, and the rowspan and colspan attributes are respected to maintain the layout integrity."},
+            {
+                "role": "user", 
+                "content": html_table
+            }
         ]
     )
     content = response.choices[0].message.content
@@ -143,7 +178,8 @@ def main():
     output_file = 'data_pairs.json'    
 
     # Generate 50 HTML tables
-    for i in range(100):
+    # for i in range(100):
+    for i in range(101, 201):
         empty_table = generate_html_table(header_merge_percentage, body_merge_percentage)
         html_table = populate_content(empty_table)
         debug_filename = f'tables/debug_{i}.html'
@@ -173,7 +209,20 @@ def main():
     with open(output_file, 'w') as f:
         json.dump(data_pairs, f, indent=4)
 
-    print(f"Data pairs saved to {output_file}")    
+    print(f"Data pairs saved to {output_file}")
+
+def huggingface_main():
+    # Create a new Hugging Face repository
+    repo_name = "html-tables"
+    repo = create_huggingface_repo(repo_name, organization_name="xeko56", private=False)
+    repo_id = repo["id"]
+    print(f"Created Hugging Face repository: {repo_name}")
+
+    # Upload the data pairs to the Hugging Face repository
+    output_file = 'data_pairs.json'
+    files = [{"filename": output_file, "filepath": output_file}]
+    upload_files_to_huggingface_repo(repo_id, files)
+    print(f"Uploaded data pairs to Hugging Face repository: {repo_name}")    
 
 if __name__ == "__main__":
     main()

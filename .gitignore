@@ -1,2 +1,7 @@
 /images/
 /tables/
+/.env/
+__pycache__/
+.ipynb_checkpoints/
+tables_o/
+wandb/
