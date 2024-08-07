@@ -1,5 +1,6 @@
 import json
 import random
+import torch
 from typing import Any, List, Tuple
 from transformers import PreTrainedTokenizer, VisionEncoderDecoderModel
 from PIL import Image
@@ -10,17 +11,19 @@ class HtmlTablesDataset(Dataset):
     def __init__(
         self,
         json_file: str,
+        processor: Any,
         tokenizer: PreTrainedTokenizer,
         model: VisionEncoderDecoderModel,
         max_length: int,
         split: str = "train",
         ignore_id: int = -100,
-        task_start_token: str = "",
+        task_start_token: str = "<s>",
         prompt_end_token: str = None,
         sort_json_key: bool = True,
         added_tokens: List[str] = [],
     ):
         super().__init__()
+        self.processor = processor
         self.tokenizer = tokenizer
         self.model = model
         self.max_length = max_length
@@ -49,25 +52,20 @@ class HtmlTablesDataset(Dataset):
         self.dataset_length = len(self.data_pairs)       
 
         # Initialize transformations for images
-        self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-        ])
 
-        html_tokens = ['<s_html>', '<table>', '<table style="border-collapse: collapse;">', '<th>'
+        html_tokens = ['<table>', '<table style="border-collapse: collapse;">', '<th>'
                        , '<th style="border: 1px solid black;">', '<tr>', '<td>', '</td>'
-                       , '<td style="border: 1px solid black;">', '</tr>', '</th>', '</table>, </s_html>']
+                       , '<td style="border: 1px solid black;">', '</tr>', '</th>', '</table>', '<s_html>']
         self.add_tokens(html_tokens)
 
         self.gt_token_sequences = []
         for sample in self.data_pairs:
             gt_jsons = sample["html"]
-            self.gt_token_sequences.append(self.minify_html(gt_jsons))
-       
-        if task_start_token or prompt_end_token:
-            # Assuming the tokenizer can handle adding tokens if necessary
-            self.add_tokens([self.task_start_token, self.prompt_end_token])
-            self.prompt_end_token_id = self.tokenizer.convert_tokens_to_ids(self.prompt_end_token)
+            self.gt_token_sequences.append([self.minify_html(gt_jsons) + self.tokenizer.eos_token])
+        # print("Test", self.gt_token_sequences)
+        self.add_tokens([self.task_start_token, self.prompt_end_token])
+        self.prompt_end_token_id = self.tokenizer.convert_tokens_to_ids(self.prompt_end_token)
+        # print("tokenizer", self.tokenizer)
 
     def minify_html(self, html: str):
         # Replace escaped double quotes with regular double quotes
@@ -120,8 +118,38 @@ class HtmlTablesDataset(Dataset):
             self.added_tokens.extend(list_of_tokens)
     
     def __len__(self) -> int:
-        return self.dataset_length
+        return len(self.data_pairs)
 
+    def __getitem__(self, idx) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        item = self.data_pairs[idx]
+        image_path = item['image'].replace("\\", "/")
+        image = Image.open(image_path).convert('RGB')
+
+        pixel_values = self.processor(image, random_padding=self.split == "train", return_tensors="pt").pixel_values
+        if pixel_values.ndim != 4:
+            raise ValueError(f"Unexpected pixel_values shape: {pixel_values.shape}")
+
+        pixel_values = pixel_values.squeeze()    
+
+        target_sequence = random.choice(self.gt_token_sequences[idx])
+        # print(f"index: {idx}", f"self.gt_token_sequences[idx]: {self.gt_token_sequences[idx]}")
+        html_content = item['html']
+        encoded_html = self.tokenizer(
+            target_sequence,
+            max_length=self.max_length,
+            truncation=True,
+            padding='max_length',
+            return_tensors='pt',
+        )["input_ids"].squeeze(0)
+
+        # print(html_content)
+        # print("Encoded HTML input IDs:", encoded_html)
+
+        labels = encoded_html.clone()
+        labels[labels == self.tokenizer.pad_token_id] = self.ignore_id
+    
+        return pixel_values, labels, target_sequence
+    
     def reassemble_html_tokens(self, tokens):
         # Implement reassembly logic that was discussed previously
         new_tokens = []
@@ -134,25 +162,4 @@ class HtmlTablesDataset(Dataset):
                 buffer += token.replace("▁", "")  # Remove '▁' and append to the current buffer
         if buffer:
             new_tokens.append(buffer)  # Append the last buffer if any
-        return new_tokens
-
-    def __getitem__(self, idx):
-        item = self.data_pairs[idx]
-        image_path = item['image'].replace("\\", "/")
-        image = Image.open(image_path).convert('RGB')
-        image = self.transform(image)
-
-        target_sequence = random.choice(self.gt_token_sequences[idx])
-        html_content = item['html']
-        encoded_html = self.tokenizer(
-            html_content,
-            return_tensors='pt',
-            max_length=self.max_length,
-            truncation=True,
-            padding='max_length'
-        )["input_ids"].squeeze(0)
-
-        labels = encoded_html.clone()
-        labels[labels == self.tokenizer.pad_token_id] = self.ignore_id 
-    
-        return image, labels, target_sequence
+        return new_tokens    

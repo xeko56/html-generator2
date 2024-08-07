@@ -23,9 +23,21 @@ class DonutModelPLModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         pixel_values, labels, _ = batch
+        max_label_value = labels.max().item()
         
-        outputs = self.model(pixel_values, labels=labels)
+        if max_label_value >= self.model.decoder.config.vocab_size:
+            print(f"Error: Max label value {max_label_value} exceeds vocabulary size {self.model.decoder.config.vocab_size}")
+            return None
+        
+        try:
+            # print("Training pixel values shape:", pixel_values.shape)
+            outputs = self.model(pixel_values, labels=labels)
+        except RuntimeError as e:
+            print(f"Error during model forward pass: {e}")
+            raise e
+
         loss = outputs.loss
+        print(f"Training loss: {loss}")
         self.log("train_loss", loss)
         return loss
 
@@ -33,7 +45,9 @@ class DonutModelPLModule(pl.LightningModule):
         pixel_values, labels, answers = batch
         batch_size = pixel_values.shape[0]
         # we feed the prompt to the model
+        # print("Training labels:", labels)
         decoder_input_ids = torch.full((batch_size, 1), self.model.config.decoder_start_token_id, device=self.device)
+        # print("decoder_input_ids:", decoder_input_ids)
         
         outputs = self.model.generate(pixel_values,
                                    decoder_input_ids=decoder_input_ids,
@@ -45,16 +59,14 @@ class DonutModelPLModule(pl.LightningModule):
                                    num_beams=1,
                                    bad_words_ids=[[self.processor.tokenizer.unk_token_id]],
                                    return_dict_in_generate=True,)
-    
         predictions = []
         for seq in self.processor.tokenizer.batch_decode(outputs.sequences):
             seq = seq.replace(self.processor.tokenizer.eos_token, "").replace(self.processor.tokenizer.pad_token, "")
             seq = re.sub(r"<.*?>", "", seq, count=1).strip()  # remove first task start token
             predictions.append(seq)
-
         scores = []
         for pred, answer in zip(predictions, answers):
-            pred = re.sub(r"(?:(?<=>) | (?=", "", answer, count=1)
+            pred = re.sub(r"(?:(?<=>) | (?=</s_))", "", pred)
             answer = answer.replace(self.processor.tokenizer.eos_token, "")
             scores.append(edit_distance(pred, answer) / max(len(pred), len(answer)))
 

@@ -1,7 +1,5 @@
+import os
 from transformers import VisionEncoderDecoderConfig, DonutProcessor, VisionEncoderDecoderModel
-import json
-import random
-import torch
 from PIL import Image
 from torchvision import transforms
 from torch.utils.data import Dataset
@@ -13,8 +11,9 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from model import DonutModelPLModule
 
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 image_size = [1280, 960]
-max_length = 512
+max_length = 768
 
 def main():
     config = VisionEncoderDecoderConfig.from_pretrained("naver-clova-ix/donut-base")
@@ -34,40 +33,54 @@ def main():
     # Initialize the dataset
 
     train_dataset = HtmlTablesDataset(
+        processor=processor,
         json_file='./data_pairs.json',
         tokenizer=tokenizer,
         model=model, 
-        max_length=2056,                         
+        max_length=max_length,                         
         split="train", 
-        task_start_token="", 
-        prompt_end_token="",
+        task_start_token="<s_html>", 
+        prompt_end_token="<s_html>",
         ignore_id=-100,
         added_tokens=added_tokens,
     )
 
     val_dataset = HtmlTablesDataset(
+        processor=processor,
         json_file='./data_pairs.json',
         tokenizer=tokenizer,
         model=model,
-        max_length=2056,                         
+        max_length=max_length,                         
         split="validation", 
-        task_start_token="", 
-        prompt_end_token="",
+        task_start_token="<s_html>", 
+        prompt_end_token="<s_html>",
         ignore_id=-100,
         added_tokens=added_tokens,
     )
 
-    pixel_values, labels, target_sequence = train_dataset[0]
+    pixel_values, labels, target_sequences = train_dataset[2]
+
+    # for id in labels.squeeze().tolist()[:30]:
+    #     if id != -100:
+    #         print(processor.decode([id]))
+    #     else:
+    #         print(id)
+    # print(f"Main target sequence: {target_sequences}")
+    # print(f"Main debugs: {processor.decode([57525])}")
+
     model.config.pad_token_id = processor.tokenizer.pad_token_id
     model.config.decoder_start_token_id = processor.tokenizer.convert_tokens_to_ids(['<s_html>'])[0]
-    print("Pad token ID:", processor.decode([model.config.pad_token_id]))
-    print("Decoder start token ID:", processor.decode([model.config.decoder_start_token_id]))
 
-    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=4)
-    val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=4)
-    batch = next(iter(train_dataloader))
-    pixel_values, labels, target_sequences = batch
-    print(pixel_values.shape)
+    # print("TOkenizer", processor.tokenizer)
+    # print("Pad token ID:", processor.decode([model.config.pad_token_id]))
+    # print("Decoder start token ID:", processor.decode([model.config.decoder_start_token_id]))  
+
+    # print("Special token IDs:", processor.tokenizer)
+    # print("Pad token:", processor.tokenizer.pad_token_id)
+    # print("EOS token:", processor.tokenizer.eos_token_id)
+    # print("UNK token:", processor.tokenizer.unk_token_id)
+    # print("Original number of tokens:", processor.tokenizer.vocab_size)
+    # print("Number of tokens after adding special tokens:", len(processor.tokenizer))
 
     # Initialize the model
     config = {
@@ -86,7 +99,7 @@ def main():
         "verbose": True,
     }
   
-    model_module = DonutModelPLModule(config, processor, model, train_dataloader, val_dataloader, max_length)
+    model_module = DonutModelPLModule(config, processor, model, train_dataset, val_dataset, max_length)
 
     # Initialize the logger
     logger = WandbLogger(project="donut", name="demo-html-generator")
@@ -109,10 +122,11 @@ def main():
             val_check_interval=config.get("val_check_interval"),
             check_val_every_n_epoch=config.get("check_val_every_n_epoch"),
             gradient_clip_val=config.get("gradient_clip_val"),
-            precision="16-mixed",
+            # precision="16-mixed",
             num_sanity_val_steps=0,
             logger=logger,
             callbacks=[PushToHubCallback(), checkpoint_callback, early_stop_callback],
+            fast_dev_run=False
     )
 
     trainer.fit(model_module)       
