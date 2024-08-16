@@ -62,12 +62,16 @@ class HtmlTablesDataset(Dataset):
         for sample in self.data_pairs:
             gt_jsons = sample["html"]
             self.gt_token_sequences.append([self.minify_html(gt_jsons) + self.tokenizer.eos_token])
-        # print("Test", self.gt_token_sequences)
+        print("Test", self.gt_token_sequences[1])
         self.add_tokens([self.task_start_token, self.prompt_end_token])
         self.prompt_end_token_id = self.tokenizer.convert_tokens_to_ids(self.prompt_end_token)
         # print("tokenizer", self.tokenizer)
 
     def minify_html(self, html: str):
+        #TODO: Remove style attributes - keep only the <table> tags
+        # function to check
+
+
         # Replace escaped double quotes with regular double quotes
         html = html.replace('\\"', '"')
         # Remove newline characters
@@ -133,7 +137,7 @@ class HtmlTablesDataset(Dataset):
 
         target_sequence = random.choice(self.gt_token_sequences[idx])
         # print(f"index: {idx}", f"self.gt_token_sequences[idx]: {self.gt_token_sequences[idx]}")
-        html_content = item['html']
+
         encoded_html = self.tokenizer(
             target_sequence,
             max_length=self.max_length,

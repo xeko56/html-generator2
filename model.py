@@ -25,9 +25,9 @@ class DonutModelPLModule(pl.LightningModule):
         pixel_values, labels, _ = batch
         max_label_value = labels.max().item()
         
-        if max_label_value >= self.model.decoder.config.vocab_size:
-            print(f"Error: Max label value {max_label_value} exceeds vocabulary size {self.model.decoder.config.vocab_size}")
-            return None
+        # if max_label_value >= self.model.decoder.config.vocab_size:
+        #     print(f"Error: Max label value {max_label_value} exceeds vocabulary size {self.model.decoder.config.vocab_size}")
+        #     return None
         
         try:
             # print("Training pixel values shape:", pixel_values.shape)

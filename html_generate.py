@@ -1,6 +1,9 @@
 import random
 import os
 import json
+import pathlib
+import tinycss2
+import random
 import numpy as np
 from bs4 import BeautifulSoup
 from openai import OpenAI
@@ -52,7 +55,7 @@ def should_merge(percentage):
     return random.random() < percentage / 100
 
 def create_cell(soup, tag, styles, content="", rowspan=1, colspan=1):
-    cell = soup.new_tag(tag, style=styles)
+    cell = soup.new_tag(tag)
     if rowspan > 1:
         cell['rowspan'] = rowspan
     if colspan > 1:
@@ -62,7 +65,7 @@ def create_cell(soup, tag, styles, content="", rowspan=1, colspan=1):
 
 def generate_html_table(header_merge_percentage, body_merge_percentage):
     soup = BeautifulSoup("", "html.parser")
-    table = soup.new_tag("table", style="border-collapse: collapse;")
+    table = soup.new_tag("table")
 
     rows = np.random.randint(3, 15)
     cols = np.random.randint(2, 10)       
@@ -143,6 +146,39 @@ def populate_content(html_table):
         raise ValueError("Table not found")
     return html_content
 
+def extract_css_classes(css: str):
+    """Extracts class selectors and their styles from a CSS string."""
+    rules = tinycss2.parse_stylesheet(css, skip_comments=True, skip_whitespace=True)
+    class_definitions = []
+    for rule in rules:
+        if rule.type == "qualified-rule":
+            prelude = tinycss2.serialize(rule.prelude).strip()
+            # print(prelude)
+            if prelude.startswith('table.'):
+                declarations = tinycss2.parse_declaration_list(rule.content, skip_comments=True, skip_whitespace=True)
+                styles = []
+                for decl in declarations:
+                    if decl.type == "declaration":
+                        prop = decl.name
+                        value = tinycss2.serialize(decl.value).strip()
+                        styles.append(f"{prop}: {value};")
+                class_definitions.append((prelude, styles))
+
+    return class_definitions
+
+def extract_class_names(css):
+    rules = tinycss2.parse_stylesheet(css, skip_comments=True, skip_whitespace=True)
+
+    for rule in rules:
+        if rule.type == "qualified-rule":
+            prelude = tinycss2.serialize(rule.prelude).strip()
+            if prelude.startswith('table.'):
+                # Extract the class name that follows 'table.'
+                class_name = prelude.split(' ')[0].split('.')[1]
+                return class_name
+    return None
+
+
 def save_html_to_file(html_content, filename):
     """
     Save HTML content to a file.
@@ -151,7 +187,7 @@ def save_html_to_file(html_content, filename):
         html_content (str): HTML content to save.
         filename (str): The file path where the HTML content will be saved.
     """
-    with open(filename, 'w') as file:
+    with open(filename, 'w', encoding='utf-8') as file:
         file.write(html_content)
 
 def render_html_to_image(html_file, output_file):
@@ -177,14 +213,19 @@ def main():
     html_folder = './tables'
     output_file = 'data_pairs.json'    
 
-    # Generate 50 HTML tables
+    # Generate HTML and CSS
     # for i in range(100):
-    for i in range(101, 201):
+    for i in range(201, 800):
         empty_table = generate_html_table(header_merge_percentage, body_merge_percentage)
-        html_table = populate_content(empty_table)
+        base_html_table = populate_content(empty_table)
         debug_filename = f'tables/debug_{i}.html'
-        html_filename = f'tables/table_{i}.html'
+        base_html_filename = f'tables/base_table_{i}.html'
         save_html_to_file(empty_table, debug_filename)
+        save_html_to_file(base_html_table, base_html_filename)
+
+        # Put CSS Style to base table
+        html_table = add_css_to_html(i)
+        html_filename = f'tables/table_{i}.html'
         save_html_to_file(html_table, html_filename)
         render_html_to_image(html_filename, f'table_{i}.png')
 
@@ -200,16 +241,64 @@ def main():
             html_path = os.path.join(html_folder, html_filename)
             
             if os.path.exists(html_path):
-                with open(html_path, 'r') as html_file:
+                with open(html_path, 'r', encoding='utf-8') as html_file:
                     html_content = html_file.read()
                     
                 data_pairs.append({"image": image_path, "html": html_content})
 
     # Save the data pairs to a JSON file
-    with open(output_file, 'w') as f:
+    with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(data_pairs, f, indent=4)
 
     print(f"Data pairs saved to {output_file}")
+
+def add_css_to_html(idx):
+    css_path = pathlib.Path('styles') / f'style_{idx}.css'
+    css_content = css_path.read_text()
+
+    existing_html_path = pathlib.Path('tables') / f'base_table_{idx}.html'
+    existing_html = existing_html_path.read_text(encoding='utf-8')
+    
+    soup = BeautifulSoup(existing_html, 'html.parser')
+
+    if not soup.html:
+        html_tag = soup.new_tag('html')
+        soup.insert(0, html_tag)
+        if not soup.head:
+            head_tag = soup.new_tag('head')
+            html_tag.append(head_tag)
+        if not soup.body:
+            body_tag = soup.new_tag('body')
+            html_tag.append(body_tag)
+
+    table = soup.find('table')
+
+    class_name = extract_class_names(css_content)
+
+    if table and class_name:
+        # Add the class if it doesn't already exist
+        existing_classes = table.get('class', [])
+        if class_name not in existing_classes:
+            table['class'] = existing_classes + [class_name]
+
+    head = soup.head
+    style_tag = soup.new_tag('style')
+    style_tag.string = css_content
+    head.append(style_tag)
+
+    # Double check
+    for element in soup.contents:
+        if element.name not in ['html', 'head', 'body']:
+            if soup.body:
+                soup.body.append(element.extract())
+            else:
+                body_tag = soup.new_tag('body')
+                soup.html.append(body_tag)
+                body_tag.append(element.extract())             
+
+    return str(soup)
+    output_path = pathlib.Path('tables') / (f'updated_table_{idx}.html')
+    output_path.write_text(str(soup)) 
 
 def huggingface_main():
     # Create a new Hugging Face repository
@@ -226,3 +315,4 @@ def huggingface_main():
 
 if __name__ == "__main__":
     main()
+    # add_css_to_html(15)

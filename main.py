@@ -12,6 +12,16 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from model import DonutModelPLModule
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+# TODO: Crop the image to the table size
+# Log the weight of the last layer, input of each batch to see if it change from step to step
+# learning rate
+# actual size Donut operate on
+# frequence of output length
+
+# donut_processor = DonutProcessor.from_pretrained(config["model_path"])
+# donut_processor.feature_extractor.size = config["feature_size"]
+# donut_processor.feature_extractor.do_align_long_axis = False
+
 image_size = [1280, 960]
 max_length = 768
 
