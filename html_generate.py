@@ -5,6 +5,7 @@ import pathlib
 import tinycss2
 import random
 import numpy as np
+from PIL import Image
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from html2image import Html2Image
@@ -113,6 +114,26 @@ def generate_html_table(header_merge_percentage, body_merge_percentage):
 
     return str(table)
 
+def clean_html_structure(html_table):
+    """
+    Cleans the HTML structure by removing the content within the table cells,
+    leaving only the tags, attributes, and structure.
+    
+    Args:
+        html_table (str): The HTML table to clean.
+        
+    Returns:
+        str: The cleaned HTML structure.
+    """
+    soup = BeautifulSoup(html_table, 'html.parser')
+    
+    # Remove content within tags but keep the structure
+    for cell in soup.find_all(['td', 'th']):
+        cell.clear()
+    
+    # Return the cleaned HTML structure as a string
+    return str(soup)
+
 def populate_content(html_table):
     """
     Populate the HTML table with semantic content using OpenAI's GPT-4o-mini model.
@@ -200,7 +221,25 @@ def render_html_to_image(html_file, output_file):
     """
     hti = Html2Image()
     hti.output_path = 'images'
-    hti.screenshot(html_file=html_file, save_as=output_file)            
+    hti.screenshot(html_file=html_file, save_as=output_file)
+
+def get_bounding_box(html_file):
+    """
+    Get the bounding box of the HTML content in an image.
+    
+    Args:
+        html_file (str): The HTML file path to render.
+        
+    Returns:
+        dict: The bounding box coordinates of the HTML content in the image.
+    """
+    image = Image.open(html_file)
+    bbox = image.getbbox()
+
+    cropped_image = image.crop(bbox)
+
+    # Save or display the cropped image
+    cropped_image.save(html_file)
 
 def main():
     # Configuration
@@ -297,8 +336,6 @@ def add_css_to_html(idx):
                 body_tag.append(element.extract())             
 
     return str(soup)
-    output_path = pathlib.Path('tables') / (f'updated_table_{idx}.html')
-    output_path.write_text(str(soup)) 
 
 def huggingface_main():
     # Create a new Hugging Face repository
@@ -311,8 +348,14 @@ def huggingface_main():
     output_file = 'data_pairs.json'
     files = [{"filename": output_file, "filepath": output_file}]
     upload_files_to_huggingface_repo(repo_id, files)
-    print(f"Uploaded data pairs to Hugging Face repository: {repo_name}")    
+    print(f"Uploaded data pairs to Hugging Face repository: {repo_name}")
+
+def test():    
+    for i in range(1, 801):
+        image_file =  f'images/table_{i}.png'
+        get_bounding_box(image_file)
 
 if __name__ == "__main__":
-    main()
+    test()
+    # main()
     # add_css_to_html(15)

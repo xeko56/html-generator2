@@ -21,13 +21,23 @@ class DonutModelPLModule(pl.LightningModule):
         self.val_dataset = val_dataset
         self.max_length = max_length
 
+        # Identify the last layer of the model for logging
+        self.last_layer = list(self.model.modules())[-1]
+        
+        # Storage for weights and inputs
+        self.last_layer_weights = None
+        self.inputs = None
+        
+        # Register hook to capture the weights and inputs of the last layer
+        self.last_layer.register_forward_hook(self.save_last_layer_weights_and_inputs)
+
+    def save_last_layer_weights_and_inputs(self, module, input, output):
+        self.last_layer_weights = module.weight.clone().detach() if hasattr(module, 'weight') else None
+        self.inputs = input[0].clone().detach()                
+
     def training_step(self, batch, batch_idx):
         pixel_values, labels, _ = batch
         max_label_value = labels.max().item()
-        
-        # if max_label_value >= self.model.decoder.config.vocab_size:
-        #     print(f"Error: Max label value {max_label_value} exceeds vocabulary size {self.model.decoder.config.vocab_size}")
-        #     return None
         
         try:
             # print("Training pixel values shape:", pixel_values.shape)
@@ -39,12 +49,25 @@ class DonutModelPLModule(pl.LightningModule):
         loss = outputs.loss
         print(f"Training loss: {loss}")
         self.log("train_loss", loss)
+
+        # if self.last_layer_weights is not None:
+        #     self.log("last_layer_weights", self.last_layer_weights.norm(), on_step=True)
+
+        # # Inspect and log the input norm
+        # if self.inputs is not None:
+        #     print(f"Captured inputs: {self.inputs}")  # Inspect the inputs
+        #     self.log("input_norm", self.inputs.norm(), on_step=True)
+        #     print(f"Input norm: {self.inputs.norm()}")  # This should not be 0.0 unless there's an issue
+
+        # self.log("input_norm", self.inputs.norm(), on_step=True)
+        # print(f"Input norm: {self.inputs.norm()}")
+
         return loss
 
     def validation_step(self, batch, batch_idx, dataset_idx=0):
         pixel_values, labels, answers = batch
         batch_size = pixel_values.shape[0]
-        # we feed the prompt to the model
+        # feed the prompt to the model
         # print("Training labels:", labels)
         decoder_input_ids = torch.full((batch_size, 1), self.model.config.decoder_start_token_id, device=self.device)
         # print("decoder_input_ids:", decoder_input_ids)
@@ -86,7 +109,7 @@ class DonutModelPLModule(pl.LightningModule):
         return optimizer
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=1, shuffle=True, num_workers=4)
+        return DataLoader(self.train_dataset, batch_size=1, shuffle=True, num_workers=0)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=1, shuffle=False, num_workers=4)
+        return DataLoader(self.val_dataset, batch_size=1, shuffle=False, num_workers=0)

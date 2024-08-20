@@ -1,6 +1,7 @@
 import json
 import random
 import torch
+import re
 from typing import Any, List, Tuple
 from transformers import PreTrainedTokenizer, VisionEncoderDecoderModel
 from PIL import Image
@@ -53,24 +54,21 @@ class HtmlTablesDataset(Dataset):
 
         # Initialize transformations for images
 
-        html_tokens = ['<table>', '<table style="border-collapse: collapse;">', '<th>'
-                       , '<th style="border: 1px solid black;">', '<tr>', '<td>', '</td>'
-                       , '<td style="border: 1px solid black;">', '</tr>', '</th>', '</table>', '<s_html>']
-        self.add_tokens(html_tokens)
+        # html_tokens = ['<table>', '<table style="border-collapse: collapse;">', '<th>'
+        #                , '<th style="border: 1px solid black;">', '<tr>', '<td>', '</td>'
+        #                , '<td style="border: 1px solid black;">', '</tr>', '</th>', '</table>', '<s_html>']
+        # self.add_tokens(html_tokens)
 
         self.gt_token_sequences = []
         for sample in self.data_pairs:
             gt_jsons = sample["html"]
             self.gt_token_sequences.append([self.minify_html(gt_jsons) + self.tokenizer.eos_token])
-        print("Test", self.gt_token_sequences[1])
         self.add_tokens([self.task_start_token, self.prompt_end_token])
         self.prompt_end_token_id = self.tokenizer.convert_tokens_to_ids(self.prompt_end_token)
         # print("tokenizer", self.tokenizer)
 
     def minify_html(self, html: str):
-        #TODO: Remove style attributes - keep only the <table> tags
         # function to check
-
 
         # Replace escaped double quotes with regular double quotes
         html = html.replace('\\"', '"')
@@ -78,6 +76,10 @@ class HtmlTablesDataset(Dataset):
         html = html.replace('\n', '')
         # Optionally, remove extra spaces between tags if they exist
         html = ' '.join(html.split())
+
+        tables = re.findall(r'<table.*?>.*?</table>', html, re.DOTALL)
+        html = ''.join(tables)
+        
         return html
 
     def json2token(self, obj: Any, update_special_tokens_for_json_key: bool = True, sort_json_key: bool = True):
