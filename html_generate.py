@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 from html2image import Html2Image
 from huggingface_hub import HfApi
+from cssgen.randomize_css import randomize_css
 
 os.environ["OPENAI_API_KEY"] = "sk-proj-qCuIGSjvbNnTrJQl6wHTT3BlbkFJGEFGiYqRCE0u4ehGDyes"
 
@@ -130,42 +131,61 @@ def clean_html_structure(html_table):
     # Remove content within tags but keep the structure
     for cell in soup.find_all(['td', 'th']):
         cell.clear()
-    
-    # Return the cleaned HTML structure as a string
-    return str(soup)
+    cleaned_html = ''.join(soup.prettify(formatter="minimal").split())
+    return cleaned_html
 
-def populate_content(html_table):
+def populate_content(html_table, max_attempts=3):
     """
     Populate the HTML table with semantic content using OpenAI's GPT-4o-mini model.
+    Ensures the structure of the populated table matches the input table.
     
     Args:
         html_table (str): The HTML table to populate with content.
+        max_attempts (int): Maximum number of attempts to populate correctly.
         
-        Returns:
-            str: The HTML table with populated content.     
+    Returns:
+        str: The HTML table with populated content.     
     """
     client = OpenAI()
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system", 
-                "content": "I have an HTML table with specific dimensions, each row and column meticulously planned to suit the layout's needs. It features cells with rowspan and colspan where specified. Please populate this table with content relevant to a conference schedule, adhering strictly to the existing structure. Ensure no cells are added or removed, and the rowspan and colspan attributes are respected to maintain the layout integrity."},
-            {
-                "role": "user", 
-                "content": html_table
-            }
-        ]
-    )
-    content = response.choices[0].message.content
-    soup = BeautifulSoup(content, 'html.parser')
-    table = soup.find('table')
+    input_structure = clean_html_structure(html_table)
 
-    if table:
-        html_content = str(table)
-    else:
-        raise ValueError("Table not found")
-    return html_content
+    for attempt in range(max_attempts):
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "I have an HTML table with specific dimensions, each row and column meticulously planned to suit the layout's needs. It features cells with rowspan and colspan where specified. Please populate this table with random but meaningful content adhering strictly to the existing structure. Ensure no cells are added or removed, and the rowspan and colspan attributes are respected to maintain the layout integrity."},
+                {
+                    "role": "user", 
+                    "content": html_table
+                }
+            ]
+        )
+        content = response.choices[0].message.content
+        soup = BeautifulSoup(content, 'html.parser')
+        populated_table = soup.find('table')
+
+        if populated_table:
+            cleaned_structure = clean_html_structure(str(populated_table))      
+            if input_structure == cleaned_structure:
+                print(f"Content successfully populated after {attempt + 1} attempts.")
+                return str(populated_table)
+            else:
+                # print(f"Attempt {attempt + 1}: Original Structure:\n{input_structure}\n")
+                # print(f"Attempt {attempt + 1}: Populated Structure:\n{cleaned_structure}\n")
+                raise ValueError("Populated content does not match the input structure.")            
+    raise ValueError(f"Table not found: {html_table}")
+
+def generate_css(index):
+    id = random.randint(1, 13)
+    path: pathlib.Path = pathlib.Path('css_template')/ f'style{id}.css'
+    css = path.read_text()
+    before = css
+    after = randomize_css(css)
+
+    output_path = pathlib.Path('styles') / f'style_{index}.css'
+    output_path.write_text(after)    
 
 def extract_css_classes(css: str):
     """Extracts class selectors and their styles from a CSS string."""
@@ -248,25 +268,35 @@ def main():
 
     os.makedirs('tables', exist_ok=True)
     os.makedirs('images', exist_ok=True)
+    os.makedirs('styles', exist_ok=True)
+
     images_folder = './images'
     html_folder = './tables'
     output_file = 'data_pairs.json'    
 
     # Generate HTML and CSS
-    # for i in range(100):
-    for i in range(201, 800):
-        empty_table = generate_html_table(header_merge_percentage, body_merge_percentage)
-        base_html_table = populate_content(empty_table)
-        debug_filename = f'tables/debug_{i}.html'
-        base_html_filename = f'tables/base_table_{i}.html'
-        save_html_to_file(empty_table, debug_filename)
-        save_html_to_file(base_html_table, base_html_filename)
+    i = 1
+    while i <= 5000:
+        try:
+            empty_table = generate_html_table(header_merge_percentage, body_merge_percentage)
+            generate_css(i)
+            base_html_table = populate_content(empty_table)
+            debug_filename = f'tables/debug_{i}.html'
+            base_html_filename = f'tables/base_table_{i}.html'
+            save_html_to_file(empty_table, debug_filename)
+            save_html_to_file(base_html_table, base_html_filename)
 
-        # Put CSS Style to base table
-        html_table = add_css_to_html(i)
-        html_filename = f'tables/table_{i}.html'
-        save_html_to_file(html_table, html_filename)
-        render_html_to_image(html_filename, f'table_{i}.png')
+            # Put CSS Style to base table
+            html_table = add_css_to_html(i)
+            html_filename = f'tables/table_{i}.html'
+            save_html_to_file(html_table, html_filename)
+            render_html_to_image(html_filename, f'table_{i}.png')
+            get_bounding_box(f'images/table_{i}.png')
+
+            i += 1
+
+        except ValueError as e:
+            print(f"Error encountered for table_{i}: {str(e)}. Skipping this table and continuing.")        
 
     data_pairs = []
 
@@ -350,12 +380,6 @@ def huggingface_main():
     upload_files_to_huggingface_repo(repo_id, files)
     print(f"Uploaded data pairs to Hugging Face repository: {repo_name}")
 
-def test():    
-    for i in range(1, 801):
-        image_file =  f'images/table_{i}.png'
-        get_bounding_box(image_file)
 
 if __name__ == "__main__":
-    test()
-    # main()
-    # add_css_to_html(15)
+    main()

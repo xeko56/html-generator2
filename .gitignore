@@ -1,7 +1,12 @@
 /images/
+/images_o/
 /tables/
 /.env/
 __pycache__/
 .ipynb_checkpoints/
 tables_o/
 wandb/
+/tables/
+/css_template/
+/model_checkpoints/
+/styles/

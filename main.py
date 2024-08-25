@@ -49,8 +49,8 @@ def main():
         model=model, 
         max_length=max_length,                         
         split="train", 
-        task_start_token="<s_html>", 
-        prompt_end_token="<s_html>",
+        task_start_token="", 
+        prompt_end_token="",
         ignore_id=-100,
         added_tokens=added_tokens,
     )
@@ -62,8 +62,8 @@ def main():
         model=model,
         max_length=max_length,                         
         split="validation", 
-        task_start_token="<s_html>", 
-        prompt_end_token="<s_html>",
+        task_start_token="", 
+        prompt_end_token="",
         ignore_id=-100,
         added_tokens=added_tokens,
     )
