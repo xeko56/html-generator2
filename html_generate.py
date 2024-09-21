@@ -4,15 +4,22 @@ import json
 import pathlib
 import tinycss2
 import random
+import yaml
+import time
 import numpy as np
 from PIL import Image
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from html2image import Html2Image
 from huggingface_hub import HfApi
-from cssgen.randomize_css import randomize_css
+from cssgen import ENV
+from cssgen.css_generator import create_style
 
 os.environ["OPENAI_API_KEY"] = "sk-proj-qCuIGSjvbNnTrJQl6wHTT3BlbkFJGEFGiYqRCE0u4ehGDyes"
+
+# Load the configuration from the YAML file
+with open(ENV.DATA_DIR / 'config.yml', 'r') as file:
+    config = yaml.safe_load(file)
 
 def create_huggingface_repo(repo_name, organization_name="username", private=False):
     """
@@ -69,8 +76,8 @@ def generate_html_table(header_merge_percentage, body_merge_percentage):
     soup = BeautifulSoup("", "html.parser")
     table = soup.new_tag("table")
 
-    rows = np.random.randint(3, 15)
-    cols = np.random.randint(2, 10)       
+    rows = np.random.randint(3, 6)
+    cols = np.random.randint(2, 6)       
     
     # Initialize grid for tracking cell spans
     grid = [[(1, 1) for _ in range(cols)] for _ in range(rows)]
@@ -155,7 +162,7 @@ def populate_content(html_table, max_attempts=3):
             messages=[
                 {
                     "role": "system", 
-                    "content": "I have an HTML table with specific dimensions, each row and column meticulously planned to suit the layout's needs. It features cells with rowspan and colspan where specified. Please populate this table with random but meaningful content adhering strictly to the existing structure. Ensure no cells are added or removed, and the rowspan and colspan attributes are respected to maintain the layout integrity."},
+                    "content": "I have an HTML table with specific dimensions, each row and column meticulously planned to suit the layout's needs. It features cells with rowspan and colspan where specified. Please populate this table with random but meaningful content adhering strictly to the existing structure. Ensure no cells are added or removed, and the rowspan and colspan attributes if existed are respected to maintain the layout integrity."},
                 {
                     "role": "user", 
                     "content": html_table
@@ -177,15 +184,23 @@ def populate_content(html_table, max_attempts=3):
                 raise ValueError("Populated content does not match the input structure.")            
     raise ValueError(f"Table not found: {html_table}")
 
-def generate_css(index):
-    id = random.randint(1, 13)
-    path: pathlib.Path = pathlib.Path('css_template')/ f'style{id}.css'
-    css = path.read_text()
-    before = css
-    after = randomize_css(css)
+# def generate_css(index):
+#     id = random.randint(1, 13)
+#     path: pathlib.Path = pathlib.Path('css_template')/ f'style{id}.css'
+#     css = path.read_text()
+#     before = css
+#     after = randomize_css(css)
 
+#     output_path = pathlib.Path('styles') / f'style_{index}.css'
+#     output_path.write_text(after)
+
+def generate_css(index):
+    seed=index
+    classname = f'C{seed}'
+    css = create_style(config, seed=seed)
+    css = css.replace('CLASS', classname)
     output_path = pathlib.Path('styles') / f'style_{index}.css'
-    output_path.write_text(after)    
+    output_path.write_text(css)    
 
 def extract_css_classes(css: str):
     """Extracts class selectors and their styles from a CSS string."""
@@ -263,8 +278,8 @@ def get_bounding_box(html_file):
 
 def main():
     # Configuration
-    body_merge_percentage = 1  # 1% chance to merge cells
-    header_merge_percentage = 20  # 20% chance to merge header cells
+    body_merge_percentage = 0  # 1% chance to merge cells
+    header_merge_percentage = 0  # 20% chance to merge header cells
 
     os.makedirs('tables', exist_ok=True)
     os.makedirs('images', exist_ok=True)
@@ -276,7 +291,7 @@ def main():
 
     # Generate HTML and CSS
     i = 1
-    while i <= 5000:
+    while i <= 2:
         try:
             empty_table = generate_html_table(header_merge_percentage, body_merge_percentage)
             generate_css(i)

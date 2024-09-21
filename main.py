@@ -1,4 +1,5 @@
 import os
+import signal
 from transformers import VisionEncoderDecoderConfig, DonutProcessor, VisionEncoderDecoderModel
 from PIL import Image
 from torchvision import transforms
@@ -12,18 +13,15 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from model import DonutModelPLModule
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-# TODO: Crop the image to the table size
-# Log the weight of the last layer, input of each batch to see if it change from step to step
-# learning rate
-# actual size Donut operate on
-# frequence of output length
-
-# donut_processor = DonutProcessor.from_pretrained(config["model_path"])
-# donut_processor.feature_extractor.size = config["feature_size"]
-# donut_processor.feature_extractor.do_align_long_axis = False
 
 image_size = [1280, 960]
 max_length = 768
+
+def handle_interrupt(sig, frame, model):
+    print("Training interrupted. Saving the model...")
+    model.save_pretrained(save_directory="./save_pretrained")
+    print("Model saved. Exiting...")
+    exit(0)
 
 def main():
     config = VisionEncoderDecoderConfig.from_pretrained("naver-clova-ix/donut-base")
@@ -49,8 +47,8 @@ def main():
         model=model, 
         max_length=max_length,                         
         split="train", 
-        task_start_token="", 
-        prompt_end_token="",
+        task_start_token="<html_table>", 
+        prompt_end_token="<html_table>",
         ignore_id=-100,
         added_tokens=added_tokens,
     )
@@ -62,45 +60,34 @@ def main():
         model=model,
         max_length=max_length,                         
         split="validation", 
-        task_start_token="", 
-        prompt_end_token="",
+        task_start_token="<html_table>", 
+        prompt_end_token="<html_table>",
         ignore_id=-100,
         added_tokens=added_tokens,
     )
 
-    pixel_values, labels, target_sequences = train_dataset[2]
-
-    # for id in labels.squeeze().tolist()[:30]:
-    #     if id != -100:
-    #         print(processor.decode([id]))
-    #     else:
-    #         print(id)
-    # print(f"Main target sequence: {target_sequences}")
-    # print(f"Main debugs: {processor.decode([57525])}")
+    # pixel_values, labels, target_sequence = train_dataset[0]
+    # print(target_sequence)
+    # print(labels)
+    # # for id in labels.tolist()[:30]:
+    # #     if id != -100:
+    # #         print(processor.decode([id]))
+    # #     else:
+    # #         print(id)
+    # return
 
     model.config.pad_token_id = processor.tokenizer.pad_token_id
-    model.config.decoder_start_token_id = processor.tokenizer.convert_tokens_to_ids(['<s_html>'])[0]
-
-    # print("TOkenizer", processor.tokenizer)
-    # print("Pad token ID:", processor.decode([model.config.pad_token_id]))
-    # print("Decoder start token ID:", processor.decode([model.config.decoder_start_token_id]))  
-
-    # print("Special token IDs:", processor.tokenizer)
-    # print("Pad token:", processor.tokenizer.pad_token_id)
-    # print("EOS token:", processor.tokenizer.eos_token_id)
-    # print("UNK token:", processor.tokenizer.unk_token_id)
-    # print("Original number of tokens:", processor.tokenizer.vocab_size)
-    # print("Number of tokens after adding special tokens:", len(processor.tokenizer))
+    model.config.decoder_start_token_id = processor.tokenizer.convert_tokens_to_ids(['<html_table>'])[0]
 
     # Initialize the model
     config = {
-        "max_epochs":30,
+        "max_epochs":1,
         "val_check_interval":0.2, # how many times we want to validate during an epoch
         "check_val_every_n_epoch":1,
         "gradient_clip_val":1.0,
         "num_training_samples_per_epoch": 800,
-        "lr":3e-5,
-        "train_batch_sizes": [8],
+        "lr":1e-6,
+        "train_batch_sizes": [1],
         "val_batch_sizes": [1],
         # "seed":2022,
         "num_nodes": 1,
@@ -111,8 +98,17 @@ def main():
   
     model_module = DonutModelPLModule(config, processor, model, train_dataset, val_dataset, max_length)
 
+    checkpoint_dir = "./model_checkpoints"
+    last_checkpoint = os.path.join(checkpoint_dir, "last-v10.ckpt")
+
+    if os.path.exists(last_checkpoint):
+        print(f"Resuming training from checkpoint: {last_checkpoint}")
+        model_module = DonutModelPLModule.load_from_checkpoint(last_checkpoint, config=config, processor=processor, model=model, train_dataset=train_dataset, val_dataset=val_dataset, max_length=max_length)
+
+    signal.signal(signal.SIGINT, lambda sig, frame: handle_interrupt(sig, frame, model_module.model))
+
     # Initialize the logger
-    logger = WandbLogger(project="donut", name="demo-html-generator")
+    logger = WandbLogger(project="HTML Generator", name="html-generator")
 
     early_stop_callback = EarlyStopping(monitor="val_edit_distance", patience=3, verbose=False, mode="min")
 
@@ -132,11 +128,11 @@ def main():
             val_check_interval=config.get("val_check_interval"),
             check_val_every_n_epoch=config.get("check_val_every_n_epoch"),
             gradient_clip_val=config.get("gradient_clip_val"),
-            # precision="16-mixed",
+            precision="16-mixed",
             num_sanity_val_steps=0,
             logger=logger,
-            callbacks=[PushToHubCallback(), checkpoint_callback, early_stop_callback],
-            fast_dev_run=False
+            callbacks=[PushToHubCallback(), checkpoint_callback],
+            fast_dev_run=False,
     )
 
     trainer.fit(model_module)       

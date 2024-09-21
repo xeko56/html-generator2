@@ -4,6 +4,7 @@ from nltk import edit_distance
 import numpy as np
 import math
 import torch
+import wandb
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from torch.optim.lr_scheduler import LambdaLR
@@ -37,8 +38,14 @@ class DonutModelPLModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         pixel_values, labels, _ = batch
-        max_label_value = labels.max().item()
-        
+
+        token_sequence_X = labels.tolist()
+        print(f"Token sequence during training: {token_sequence_X}")
+
+        input_lengths = (labels != self.processor.tokenizer.pad_token_id).sum(dim=-1)
+        for length in input_lengths:
+            self.log(f"input_length_freq_{length.item()}", 1, on_step=True, on_epoch=True, reduce_fx="sum")
+
         try:
             # print("Training pixel values shape:", pixel_values.shape)
             outputs = self.model(pixel_values, labels=labels)
@@ -50,27 +57,29 @@ class DonutModelPLModule(pl.LightningModule):
         print(f"Training loss: {loss}")
         self.log("train_loss", loss)
 
-        # if self.last_layer_weights is not None:
-        #     self.log("last_layer_weights", self.last_layer_weights.norm(), on_step=True)
-
-        # # Inspect and log the input norm
-        # if self.inputs is not None:
-        #     print(f"Captured inputs: {self.inputs}")  # Inspect the inputs
-        #     self.log("input_norm", self.inputs.norm(), on_step=True)
-        #     print(f"Input norm: {self.inputs.norm()}")  # This should not be 0.0 unless there's an issue
-
-        # self.log("input_norm", self.inputs.norm(), on_step=True)
-        # print(f"Input norm: {self.inputs.norm()}")
-
         return loss
 
     def validation_step(self, batch, batch_idx, dataset_idx=0):
         pixel_values, labels, answers = batch
         batch_size = pixel_values.shape[0]
+
+        # Log the frequency of input lengths
+        input_lengths = (labels != self.processor.tokenizer.pad_token_id).sum(dim=-1)
+        for length in input_lengths:
+            self.log(f"val_input_length_freq_{length.item()}", 1, on_step=True, on_epoch=True, reduce_fx="sum")
+
+        try:
+            outputs = self.model(pixel_values, labels=labels)
+        except RuntimeError as e:
+            print(f"Error during model forward pass: {e}")
+            raise e
+
+        val_loss = outputs.loss
+        print(f"Validation loss: {val_loss}")
+        self.log("val_loss", val_loss)            
+
         # feed the prompt to the model
-        # print("Training labels:", labels)
         decoder_input_ids = torch.full((batch_size, 1), self.model.config.decoder_start_token_id, device=self.device)
-        # print("decoder_input_ids:", decoder_input_ids)
         
         outputs = self.model.generate(pixel_values,
                                    decoder_input_ids=decoder_input_ids,
@@ -82,10 +91,15 @@ class DonutModelPLModule(pl.LightningModule):
                                    num_beams=1,
                                    bad_words_ids=[[self.processor.tokenizer.unk_token_id]],
                                    return_dict_in_generate=True,)
+        
+        token_sequence = outputs.sequences.tolist()
+        print(f"Token sequence during validation: {token_sequence }")
+
         predictions = []
         for seq in self.processor.tokenizer.batch_decode(outputs.sequences):
             seq = seq.replace(self.processor.tokenizer.eos_token, "").replace(self.processor.tokenizer.pad_token, "")
-            seq = re.sub(r"<.*?>", "", seq, count=1).strip()  # remove first task start token
+            seq = re.sub(r"<.*?>", "", seq, count=2).strip()  # remove first task start
+            # print("Seq", seq) 
             predictions.append(seq)
         scores = []
         for pred, answer in zip(predictions, answers):
@@ -100,16 +114,19 @@ class DonutModelPLModule(pl.LightningModule):
 
         self.log("val_edit_distance", np.mean(scores))
         
-        return scores
+        return {"val_loss": val_loss, "val_edit_distance": np.mean(scores)}
+    
+    def on_epoch_end(self):
+        model_weights = self.model.state_dict()
+        for name, param in model_weights.items():
+            self.logger.experiment.log({f"weights/{name}": wandb.Histogram(param.cpu().numpy())})    
 
     def configure_optimizers(self):
-        # you could also add a learning rate scheduler if you want
         optimizer = torch.optim.Adam(self.parameters(), lr=self.config.get("lr"))
-    
         return optimizer
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=1, shuffle=True, num_workers=0)
+        return DataLoader(self.train_dataset, batch_size=self.config.get("train_batch_sizes")[0], shuffle=True, num_workers=0)
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=1, shuffle=False, num_workers=0)

@@ -10,3 +10,5 @@ wandb/
 /css_template/
 /model_checkpoints/
 /styles/
+/dataset_old/
+/dataset_no_merge_8_col/

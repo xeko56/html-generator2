@@ -7,8 +7,8 @@ import numpy as np
 from PIL import Image
 from donut import JSONParseEvaluator
 
-processor = DonutProcessor.from_pretrained("xeko56/html-demo")
-model = VisionEncoderDecoderModel.from_pretrained("xeko56/html-demo")
+processor = DonutProcessor.from_pretrained("xeko56/simple-html-generator-tokens")
+model = VisionEncoderDecoderModel.from_pretrained("xeko56/simple-html-generator-tokens")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -41,7 +41,7 @@ def process_data(json_file, split='validation'):
             image = image.to(device)
 
             # prepare decoder inputs
-            task_prompt = "<s_html>"
+            task_prompt = "<html_table>"
             decoder_input_ids = processor.tokenizer(task_prompt, add_special_tokens=False, return_tensors="pt").input_ids
             decoder_input_ids = decoder_input_ids.to(device)
 
@@ -62,7 +62,7 @@ def process_data(json_file, split='validation'):
             # turn into JSON
             seq = processor.batch_decode(outputs.sequences)[0]
             seq = seq.replace(processor.tokenizer.eos_token, "").replace(processor.tokenizer.pad_token, "")
-            seq = re.sub(r"<.*?>", "", seq, count=1).strip()  # remove first task start token
+            seq = re.sub(r"<.*?>", "", seq, count=3).strip()  # remove first task start token
             # seq = processor.token2json(seq)
 
             print(seq)
@@ -76,6 +76,8 @@ def process_data(json_file, split='validation'):
 
         scores = {"accuracies": accs, "mean_accuracy": np.mean(accs)}
         print(scores, f"length : {len(accs)}")
+        with open(f'{split}_output.json', 'w') as file:
+            json.dump(scores, file)
 
 json_file = 'data_pairs.json'
 process_data(json_file, split='validation')

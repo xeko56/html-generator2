@@ -54,9 +54,9 @@ class HtmlTablesDataset(Dataset):
 
         # Initialize transformations for images
 
-        # html_tokens = ['<table>', '<table style="border-collapse: collapse;">', '<th>'
-        #                , '<th style="border: 1px solid black;">', '<tr>', '<td>', '</td>'
-        #                , '<td style="border: 1px solid black;">', '</tr>', '</th>', '</table>', '<s_html>']
+        # html_tokens = ['<table>', '<th>'
+        #                , '<tr>', '<td>', '</td>'
+        #                , '</tr>', '</th>', '</table>']
         # self.add_tokens(html_tokens)
 
         self.gt_token_sequences = []
@@ -65,7 +65,6 @@ class HtmlTablesDataset(Dataset):
             self.gt_token_sequences.append([self.minify_html(gt_jsons) + self.tokenizer.eos_token])
         self.add_tokens([self.task_start_token, self.prompt_end_token])
         self.prompt_end_token_id = self.tokenizer.convert_tokens_to_ids(self.prompt_end_token)
-        # print("tokenizer", self.tokenizer)
 
     def minify_html(self, html: str):
         # function to check
@@ -138,7 +137,6 @@ class HtmlTablesDataset(Dataset):
         pixel_values = pixel_values.squeeze()    
 
         target_sequence = random.choice(self.gt_token_sequences[idx])
-        # print(f"index: {idx}", f"self.gt_token_sequences[idx]: {self.gt_token_sequences[idx]}")
 
         encoded_html = self.tokenizer(
             target_sequence,
