@@ -72,7 +72,7 @@ def create_cell(soup, tag, styles, content="", rowspan=1, colspan=1):
     cell.string = content
     return cell
 
-def generate_html_table(header_merge_percentage, body_merge_percentage):
+def generate_html_table(header_merge_percentage, body_merge_percentage, rowspan_merge_percentage, colspan_merge_percentage):
     soup = BeautifulSoup("", "html.parser")
     table = soup.new_tag("table")
 
@@ -97,8 +97,14 @@ def generate_html_table(header_merge_percentage, body_merge_percentage):
         while j < cols:
             current_percentage = header_merge_percentage if i == 0 else body_merge_percentage
             if should_merge(current_percentage):
-                rowspan = random.randint(1, rows - i)
-                colspan = random.randint(1, cols - j)
+                rowspan = 1
+                colspan = 1
+
+                if should_merge(rowspan_merge_percentage):
+                    rowspan = np.random.randint(1, rows - i)
+
+                if should_merge(colspan_merge_percentage):
+                    colspan = np.random.randint(1, cols - j)                    
 
                 if is_span_possible(i, j, rowspan, colspan):
                     # Apply span
@@ -278,8 +284,10 @@ def get_bounding_box(html_file):
 
 def main():
     # Configuration
-    body_merge_percentage = 0  # 1% chance to merge cells
-    header_merge_percentage = 0  # 20% chance to merge header cells
+    body_merge_percentage = 10  # 1% chance to merge cells
+    header_merge_percentage = 20  # 20% chance to merge header cells
+    rowspan_merge_percentage = 40  # 40% chance to merge rowspan cells
+    colspan_merge_percentage = 40  # 40% chance to merge colspan cells
 
     os.makedirs('tables', exist_ok=True)
     os.makedirs('images', exist_ok=True)
@@ -290,10 +298,10 @@ def main():
     output_file = 'data_pairs.json'    
 
     # Generate HTML and CSS
-    i = 1
-    while i <= 2:
+    i = 2166
+    while i <= 5000:
         try:
-            empty_table = generate_html_table(header_merge_percentage, body_merge_percentage)
+            empty_table = generate_html_table(header_merge_percentage, body_merge_percentage, rowspan_merge_percentage, colspan_merge_percentage)
             generate_css(i)
             base_html_table = populate_content(empty_table)
             debug_filename = f'tables/debug_{i}.html'
