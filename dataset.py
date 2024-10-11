@@ -77,8 +77,11 @@ class HtmlTablesDataset(Dataset):
         html = ' '.join(html.split())
 
         tables = re.findall(r'<table.*?>.*?</table>', html, re.DOTALL)
-        html = ''.join(tables)
-        
+        cleaned_tables = [re.sub(r'\s*class="[^"]*"', '', table) for table in tables]
+
+        # Join the cleaned tables back into a single HTML string
+        html = ''.join(cleaned_tables)
+
         return html
 
     def json2token(self, obj: Any, update_special_tokens_for_json_key: bool = True, sort_json_key: bool = True):

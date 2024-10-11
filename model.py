@@ -39,9 +39,6 @@ class DonutModelPLModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         pixel_values, labels, _ = batch
 
-        token_sequence_X = labels.tolist()
-        print(f"Token sequence during training: {token_sequence_X}")
-
         input_lengths = (labels != self.processor.tokenizer.pad_token_id).sum(dim=-1)
         for length in input_lengths:
             self.log(f"input_length_freq_{length.item()}", 1, on_step=True, on_epoch=True, reduce_fx="sum")
@@ -92,8 +89,6 @@ class DonutModelPLModule(pl.LightningModule):
                                    bad_words_ids=[[self.processor.tokenizer.unk_token_id]],
                                    return_dict_in_generate=True,)
         
-        token_sequence = outputs.sequences.tolist()
-        print(f"Token sequence during validation: {token_sequence }")
 
         predictions = []
         for seq in self.processor.tokenizer.batch_decode(outputs.sequences):

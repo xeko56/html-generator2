@@ -7,8 +7,12 @@ import numpy as np
 from PIL import Image
 from donut import JSONParseEvaluator
 
-processor = DonutProcessor.from_pretrained("xeko56/html-generator")
-model = VisionEncoderDecoderModel.from_pretrained("xeko56/html-generator")
+processor = DonutProcessor.from_pretrained("xeko56/html-generator-level-3")
+model = VisionEncoderDecoderModel.from_pretrained("xeko56/html-generator-level-3")
+
+torch.backends.cudnn.benchmark = True
+torch.cuda.empty_cache()
+torch.cuda.reset_max_memory_allocated()
 
 print(processor.tokenizer)
 
@@ -20,7 +24,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model.eval()
 model.to(device)
 
-image = Image.open('./images/table_1.png').convert('RGB')
+image = Image.open('./images/table_4018.png').convert('RGB')
 image = processor(image, return_tensors="pt").pixel_values
 image = image.to(device)
 # prepare decoder inputs
@@ -48,11 +52,13 @@ with open(log_file_path, 'w', encoding='utf-8') as log_file:
     for method in sampling_methods:
         log_file.write(f"Testing {method['method']}\n")
 
+        print(processor.tokenizer)
+
         # Generate the sequence using the specified method
         outputs = model.generate(
             image,
             decoder_input_ids=decoder_input_ids,
-            max_length=model.decoder.config.max_position_embeddings,
+            max_length=768,
             early_stopping=True,
             pad_token_id=processor.tokenizer.pad_token_id,
             eos_token_id=processor.tokenizer.eos_token_id,
@@ -69,7 +75,7 @@ with open(log_file_path, 'w', encoding='utf-8') as log_file:
         # Decode and clean up the generated sequence
         seq = processor.batch_decode(outputs.sequences)[0]
         seq = seq.replace(processor.tokenizer.eos_token, "").replace(processor.tokenizer.pad_token, "")
-        seq = re.sub(r"<.*?>", "", seq, count=3).strip()  # remove first task start token
+        seq = re.sub(r"<.*?>", "", seq, count=2).strip()  # remove first task start token
         
         # Write the output to the log file
         log_file.write(f"Output using {method['method']}:\n")

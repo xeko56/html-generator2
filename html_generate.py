@@ -76,8 +76,8 @@ def generate_html_table(header_merge_percentage, body_merge_percentage, rowspan_
     soup = BeautifulSoup("", "html.parser")
     table = soup.new_tag("table")
 
-    rows = np.random.randint(3, 6)
-    cols = np.random.randint(2, 6)       
+    rows = np.random.randint(3, 13)
+    cols = np.random.randint(2, 13)       
     
     # Initialize grid for tracking cell spans
     grid = [[(1, 1) for _ in range(cols)] for _ in range(rows)]
@@ -284,8 +284,8 @@ def get_bounding_box(html_file):
 
 def main():
     # Configuration
-    body_merge_percentage = 10  # 1% chance to merge cells
-    header_merge_percentage = 20  # 20% chance to merge header cells
+    body_merge_percentage = 50  # 1% chance to merge cells
+    header_merge_percentage = 50  # 20% chance to merge header cells
     rowspan_merge_percentage = 40  # 40% chance to merge rowspan cells
     colspan_merge_percentage = 40  # 40% chance to merge colspan cells
 
@@ -298,7 +298,7 @@ def main():
     output_file = 'data_pairs.json'    
 
     # Generate HTML and CSS
-    i = 2166
+    i = 1
     while i <= 5000:
         try:
             empty_table = generate_html_table(header_merge_percentage, body_merge_percentage, rowspan_merge_percentage, colspan_merge_percentage)

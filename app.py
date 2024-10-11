@@ -24,8 +24,12 @@ def generate_html_from_image(image, checkpoint_path=""):
     if not os.path.exists(checkpoint_path):
         checkpoint_path = "xeko56/html-generator"
 
-    processor = DonutProcessor.from_pretrained(checkpoint_path)
-    model = VisionEncoderDecoderModel.from_pretrained(checkpoint_path)
+    processor = DonutProcessor.from_pretrained("xeko56/html-generator-level-1")
+    model = VisionEncoderDecoderModel.from_pretrained("xeko56/html-generator-level-1")
+
+    torch.backends.cudnn.benchmark = True
+    torch.cuda.empty_cache()
+    torch.cuda.reset_max_memory_allocated()
 
     state_dict_hash = get_model_hash(model)
     print(f"Loaded model state dict hash: {state_dict_hash}")
@@ -39,29 +43,43 @@ def generate_html_from_image(image, checkpoint_path=""):
     image = image.to(device)
 
     task_prompt = "<html_table>"
-    decoder_input_ids = processor.tokenizer(task_prompt, add_special_tokens=False, return_tensors="pt").input_ids
-    decoder_input_ids = decoder_input_ids.to(device)
-
+    # decoder_input_ids = processor.tokenizer(task_prompt, add_special_tokens=False, return_tensors="pt").input_ids
+    # decoder_input_ids = decoder_input_ids.to(device)
+    decoder_input_ids = torch.full((batch_size, 1), model.config.decoder_start_token_id, device=device)
     print(decoder_input_ids)
 
-    outputs = model.generate(
-        image,
-        decoder_input_ids=decoder_input_ids,
-        max_length=model.decoder.config.max_position_embeddings,
-        early_stopping=True,
-        pad_token_id=processor.tokenizer.pad_token_id,
-        eos_token_id=processor.tokenizer.eos_token_id,
-        use_cache=True,
-        num_beams=1,
-        bad_words_ids=[[processor.tokenizer.unk_token_id]],
-        do_sample=False,  # Enable sampling for more diversity
-        top_k=None,  # Use top-k sampling to only sample from the top 50 tokens
-        top_p=None,  # Or use nucleus sampling (sampling from the top 90% probability mass)
-        temperature=None,  # Lower temperature for more focused sampling
-        return_dict_in_generate=True,      
-    )
+    outputs = model.generate(image,
+                                decoder_input_ids=decoder_input_ids,
+                                max_length=768,
+                                early_stopping=True,
+                                pad_token_id=processor.tokenizer.pad_token_id,
+                                eos_token_id=processor.tokenizer.eos_token_id,
+                                use_cache=True,
+                                num_beams=1,
+                                bad_words_ids=[[processor.tokenizer.unk_token_id]],
+                                return_dict_in_generate=True,)    
 
-    print(outputs.sequences)
+    # outputs = model.generate(
+    #     image,
+    #     decoder_input_ids=decoder_input_ids,
+    #     max_length=model.decoder.config.max_position_embeddings,
+    #     early_stopping=True,
+    #     pad_token_id=processor.tokenizer.pad_token_id,
+    #     eos_token_id=processor.tokenizer.eos_token_id,
+    #     use_cache=True,
+    #     num_beams=1,
+    #     bad_words_ids=[[processor.tokenizer.unk_token_id]],
+    #     do_sample=False,  # Enable sampling for more diversity
+    #     top_k=None,  # Use top-k sampling to only sample from the top 50 tokens
+    #     top_p=None,  # Or use nucleus sampling (sampling from the top 90% probability mass)
+    #     temperature=None,  # Lower temperature for more focused sampling
+    #     return_dict_in_generate=True,      
+    # )
+
+    token_sequence_Y = outputs.sequences.tolist()
+    print(f"Token sequence during validation: {token_sequence_Y }")
+    decoded_validation_sequences = processor.tokenizer.batch_decode(token_sequence_Y, skip_special_tokens=True)
+    print(f"Decoded validation sequences: {decoded_validation_sequences}")
     seq = processor.batch_decode(outputs.sequences)[0]
     print(seq) 
     seq = seq.replace(processor.tokenizer.eos_token, "").replace(processor.tokenizer.pad_token, "")

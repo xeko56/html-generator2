@@ -99,7 +99,7 @@ def main():
     model_module = DonutModelPLModule(config, processor, model, train_dataset, val_dataset, max_length)
 
     checkpoint_dir = "./model_checkpoints"
-    last_checkpoint = os.path.join(checkpoint_dir, "last-v10.ckpt")
+    last_checkpoint = os.path.join(checkpoint_dir, "last-v3.ckpt")
 
     if os.path.exists(last_checkpoint):
         print(f"Resuming training from checkpoint: {last_checkpoint}")
@@ -108,7 +108,7 @@ def main():
     signal.signal(signal.SIGINT, lambda sig, frame: handle_interrupt(sig, frame, model_module.model))
 
     # Initialize the logger
-    logger = WandbLogger(project="HTML Generator", name="html-generator")
+    logger = WandbLogger(project="HTML Generator", name="html-generator-level-2")
 
     early_stop_callback = EarlyStopping(monitor="val_edit_distance", patience=3, verbose=False, mode="min")
 
@@ -131,7 +131,7 @@ def main():
             precision="16-mixed",
             num_sanity_val_steps=0,
             logger=logger,
-            callbacks=[PushToHubCallback(), checkpoint_callback],
+            callbacks=[PushToHubCallback(), checkpoint_callback, early_stop_callback],
             fast_dev_run=False,
     )
 
