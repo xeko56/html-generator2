@@ -3,12 +3,32 @@ import random
 import torch
 import re
 from typing import Any, List, Tuple
+from utils import minify_html
 from transformers import PreTrainedTokenizer, VisionEncoderDecoderModel
 from PIL import Image
 from torchvision import transforms
 from torch.utils.data import Dataset
 
 class HtmlTablesDataset(Dataset):
+    """
+    A PyTorch Dataset class for handling HTML table data. This class is designed to preprocess and structure data from 
+    a given JSON file containing HTML tables, preparing it for use in models that involve both vision (image) and 
+    text (HTML) modalities. It integrates with a tokenizer and a VisionEncoderDecoderModel to enable processing of 
+    the data for tasks like table structure recognition or information extraction.
+
+    Args:
+        json_file (str): Path to the JSON file containing HTML table data.
+        processor (Any): A processor object responsible for any additional preprocessing of the input data.
+        tokenizer (PreTrainedTokenizer): Tokenizer used for encoding the input HTML data.
+        model (VisionEncoderDecoderModel): Pre-trained model that encodes images and decodes the table structure.
+        max_length (int): Maximum sequence length for the tokenized input.
+        split (str, optional): Dataset split to load, such as 'train', 'test', or 'validation'. Default is 'train'.
+        ignore_id (int, optional): Token ID used to ignore certain tokens during model training (e.g., padding tokens). Default is -100.
+        task_start_token (str, optional): The start token used for model task-specific prompting. Default is "<s>".
+        prompt_end_token (str, optional): Token indicating the end of the prompt, if applicable. Default is None.
+        sort_json_key (bool, optional): Whether to sort the keys in the JSON file before processing. Default is True.
+        added_tokens (List[str], optional): Additional tokens that should be added to the tokenizer. Default is an empty list.
+    """
     def __init__(
         self,
         json_file: str,
@@ -52,69 +72,16 @@ class HtmlTablesDataset(Dataset):
                 raise ValueError("Invalid split name")             
         self.dataset_length = len(self.data_pairs)       
 
-        # Initialize transformations for images
-
-        # html_tokens = ['<table>', '<th>'
-        #                , '<tr>', '<td>', '</td>'
-        #                , '</tr>', '</th>', '</table>']
-        # self.add_tokens(html_tokens)
-
+        # Process the ground truth HTML data
         self.gt_token_sequences = []
         for sample in self.data_pairs:
             gt_jsons = sample["html"]
+            # Add the task start token and prompt end token to the HTML content
             self.gt_token_sequences.append([self.minify_html(gt_jsons) + self.tokenizer.eos_token])
+
+        # Add the special tokens to the tokenizer
         self.add_tokens([self.task_start_token, self.prompt_end_token])
         self.prompt_end_token_id = self.tokenizer.convert_tokens_to_ids(self.prompt_end_token)
-
-    def minify_html(self, html: str):
-        # function to check
-
-        # Replace escaped double quotes with regular double quotes
-        html = html.replace('\\"', '"')
-        # Remove newline characters
-        html = html.replace('\n', '')
-        # Optionally, remove extra spaces between tags if they exist
-        html = ' '.join(html.split())
-
-        tables = re.findall(r'<table.*?>.*?</table>', html, re.DOTALL)
-        cleaned_tables = [re.sub(r'\s*class="[^"]*"', '', table) for table in tables]
-
-        # Join the cleaned tables back into a single HTML string
-        html = ''.join(cleaned_tables)
-
-        return html
-
-    def json2token(self, obj: Any, update_special_tokens_for_json_key: bool = True, sort_json_key: bool = True):
-        """
-        Convert an ordered JSON object into a token sequence
-        """
-        if type(obj) == dict:
-            if len(obj) == 1 and "text_sequence" in obj:
-                return obj["text_sequence"]
-            else:
-                output = ""
-                if sort_json_key:
-                    keys = sorted(obj.keys(), reverse=True)
-                else:
-                    keys = obj.keys()
-                for k in keys:
-                    if update_special_tokens_for_json_key:
-                        self.add_tokens([fr"", fr""])
-                    output += (
-                        fr""
-                        + self.json2token(obj[k], update_special_tokens_for_json_key, sort_json_key)
-                        + fr""
-                    )
-                return output
-        elif type(obj) == list:
-            return r"".join(
-                [self.json2token(item, update_special_tokens_for_json_key, sort_json_key) for item in obj]
-            )
-        else:
-            obj = str(obj)
-            if f"<{obj}/>" in self.added_tokens:
-                obj = f"<{obj}/>"  # for categorical special tokens
-            return obj
     
     def add_tokens(self, list_of_tokens: List[str]):
         """
@@ -139,7 +106,8 @@ class HtmlTablesDataset(Dataset):
 
         pixel_values = pixel_values.squeeze()    
 
-        target_sequence = random.choice(self.gt_token_sequences[idx])
+        # Get the target sequence, which is a HTML string and encode it
+        target_sequence = self.gt_token_sequences[idx]
 
         encoded_html = self.tokenizer(
             target_sequence,
@@ -149,24 +117,8 @@ class HtmlTablesDataset(Dataset):
             return_tensors='pt',
         )["input_ids"].squeeze(0)
 
-        # print(html_content)
-        # print("Encoded HTML input IDs:", encoded_html)
-
+        # Replace padding tokens with the ignore_id
         labels = encoded_html.clone()
         labels[labels == self.tokenizer.pad_token_id] = self.ignore_id
     
         return pixel_values, labels, target_sequence
-    
-    def reassemble_html_tokens(self, tokens):
-        # Implement reassembly logic that was discussed previously
-        new_tokens = []
-        buffer = ""
-        for token in tokens:
-            if token.startswith("▁") and buffer:
-                new_tokens.append(buffer)
-                buffer = token[1:]  # Remove the '▁' for a new token
-            else:
-                buffer += token.replace("▁", "")  # Remove '▁' and append to the current buffer
-        if buffer:
-            new_tokens.append(buffer)  # Append the last buffer if any
-        return new_tokens    

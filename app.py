@@ -1,38 +1,27 @@
 import streamlit as st
 from PIL import Image
-from transformers import VisionEncoderDecoderConfig, DonutProcessor, VisionEncoderDecoderModel
+from transformers import DonutProcessor, VisionEncoderDecoderModel
+from utils import levenshtein_ratio, minify_html
 import re
 import torch
-import hashlib
 import os
-from tqdm.auto import tqdm
+import Levenshtein
 import numpy as np
-from donut import JSONParseEvaluator
-from model import DonutModelPLModule
-from dataset import HtmlTablesDataset
 
+# Set the page layout to wide
 st.set_page_config(layout="wide")
 
-def get_model_hash(model):
-    """Compute the hash of the model's state dict."""
-    state_dict = model.state_dict()
-    model_bytes = b''.join(param.cpu().numpy().tobytes() for param in state_dict.values())
-    return hashlib.md5(model_bytes).hexdigest()
+def generate_html_from_image(image):
+    """Generate HTML code from an image of an HTML table."""
 
-def generate_html_from_image(image, checkpoint_path=""):
-    # ./save_pretrained
-    if not os.path.exists(checkpoint_path):
-        checkpoint_path = "xeko56/html-generator"
+    # Load the model and processor from the Hugging Face Hub
+    processor = DonutProcessor.from_pretrained("xeko56/html-generator-level-4")
+    model = VisionEncoderDecoderModel.from_pretrained("xeko56/html-generator-level-4")
 
-    processor = DonutProcessor.from_pretrained("xeko56/html-generator-level-1")
-    model = VisionEncoderDecoderModel.from_pretrained("xeko56/html-generator-level-1")
-
+    # Remove cache and reset memory to prevent issue by inference
     torch.backends.cudnn.benchmark = True
     torch.cuda.empty_cache()
     torch.cuda.reset_max_memory_allocated()
-
-    state_dict_hash = get_model_hash(model)
-    print(f"Loaded model state dict hash: {state_dict_hash}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.eval()
@@ -42,12 +31,12 @@ def generate_html_from_image(image, checkpoint_path=""):
     image = processor(image, return_tensors="pt").pixel_values
     image = image.to(device)
 
+    # Define the task prompt
     task_prompt = "<html_table>"
-    # decoder_input_ids = processor.tokenizer(task_prompt, add_special_tokens=False, return_tensors="pt").input_ids
-    # decoder_input_ids = decoder_input_ids.to(device)
-    decoder_input_ids = torch.full((batch_size, 1), model.config.decoder_start_token_id, device=device)
-    print(decoder_input_ids)
+    decoder_input_ids = processor.tokenizer(task_prompt, add_special_tokens=False, return_tensors="pt").input_ids
+    decoder_input_ids = decoder_input_ids.to(device)
 
+    # Generate HTML code from the image
     outputs = model.generate(image,
                                 decoder_input_ids=decoder_input_ids,
                                 max_length=768,
@@ -58,67 +47,78 @@ def generate_html_from_image(image, checkpoint_path=""):
                                 num_beams=1,
                                 bad_words_ids=[[processor.tokenizer.unk_token_id]],
                                 return_dict_in_generate=True,)    
-
-    # outputs = model.generate(
-    #     image,
-    #     decoder_input_ids=decoder_input_ids,
-    #     max_length=model.decoder.config.max_position_embeddings,
-    #     early_stopping=True,
-    #     pad_token_id=processor.tokenizer.pad_token_id,
-    #     eos_token_id=processor.tokenizer.eos_token_id,
-    #     use_cache=True,
-    #     num_beams=1,
-    #     bad_words_ids=[[processor.tokenizer.unk_token_id]],
-    #     do_sample=False,  # Enable sampling for more diversity
-    #     top_k=None,  # Use top-k sampling to only sample from the top 50 tokens
-    #     top_p=None,  # Or use nucleus sampling (sampling from the top 90% probability mass)
-    #     temperature=None,  # Lower temperature for more focused sampling
-    #     return_dict_in_generate=True,      
-    # )
-
-    token_sequence_Y = outputs.sequences.tolist()
-    print(f"Token sequence during validation: {token_sequence_Y }")
-    decoded_validation_sequences = processor.tokenizer.batch_decode(token_sequence_Y, skip_special_tokens=True)
-    print(f"Decoded validation sequences: {decoded_validation_sequences}")
+    # Decode the model output
     seq = processor.batch_decode(outputs.sequences)[0]
-    print(seq) 
+    # Remove special tokens and extra spaces
     seq = seq.replace(processor.tokenizer.eos_token, "").replace(processor.tokenizer.pad_token, "")
+    # Remove the first task start token
     seq = re.sub(r"<.*?>", "", seq, count=2).strip()
-            
 
     return seq
 
+def quantitative_evaluation(ground_truth, output):
+    """Compute quantitative evaluation metrics for the model."""
+    # Compute Levenshtein ratio
+    acc = levenshtein_ratio(ground_truth, output)
+    levenshtein = Levenshtein.distance(ground_truth, output)
+    return {
+        "acc": acc,
+        "levenshtein": levenshtein
+    }
+
 def main():
-  st.title("HTML Generator from Image")
+    st.title("HTML Generator from Image")
 
-  col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
+    # Displaying input in the first column
+    with col1:
+        uploaded_image = st.file_uploader("Upload an Image of an HTML Table", type=["jpg", "png", "jpeg"])
 
-  with col1:
-      uploaded_image = st.file_uploader("Upload an Image of an HTML Table", type=["jpg", "png", "jpeg"])
+        if uploaded_image is not None:
+            # Crop the image for the cases it has not been cropped to bounding box before 
+            image = Image.open(uploaded_image)
+            bbox = image.getbbox()
+            cropped_image = image.crop(bbox)
+            # Save or display the cropped image
+            cropped_image.save("test.png")
+            st.image(cropped_image, caption="Uploaded Image", use_column_width=True)
 
-      if uploaded_image is not None:
-          image = Image.open(uploaded_image)
-          st.image(image, caption="Uploaded Image", use_column_width=True)
-  
-  # Displaying output in the second column
-  with col2:
-      if uploaded_image is not None:
-          html_code = generate_html_from_image(image)
-          
-          # Option to choose between HTML Code or Rendered HTML
-          display_option = st.radio(
-              "Output",
-              ("HTML Code", "Rendered HTML")
-          )
+    # Displaying output in the second column
+    with col2:
+        if uploaded_image is not None:
+            html_code = generate_html_from_image(cropped_image)
 
-          if display_option == "HTML Code":
-              st.subheader("Generated HTML Code")
-              st.code(html_code, language='html')
-          else:
-              st.subheader("Rendered HTML Table")
-              st.markdown(html_code, unsafe_allow_html=True)
+            # Please comment out this block for testing on data not coming from the dataset
+            # Begin of block
 
-# streamlit run html_table_generator.py
+            file_name = os.path.splitext(uploaded_image.name)[0]
+            # Load the HTML content from the dataset
+            html_file_name = f"dataset_stage4/tables/{file_name}.html"
+            with open(html_file_name, 'r') as html_file:
+                input_content = html_file.read()
+                input_content = minify_html(input_content)
+
+            #End of block
+            
+            # Option to choose between HTML Code or Rendered HTML
+            display_option = st.radio(
+                "Output",
+                ("HTML Code", "Rendered HTML")
+            )
+
+            if display_option == "HTML Code":
+                st.subheader("Generated HTML Code")
+                st.code(html_code, language='html')
+            else:
+                st.subheader("Rendered HTML Table")
+                st.markdown(html_code, unsafe_allow_html=True)
+
+            # Please comment out this block for testing on data not coming from the dataset
+            # Begin of block
+            result = quantitative_evaluation(input_content, html_code)
+            st.markdown("Accuracy: " + str(result["acc"]))
+            st.markdown("Levenshtein distance: " + str(result["levenshtein"]))
+            # End of block
 
 if __name__ == "__main__":
     main()
